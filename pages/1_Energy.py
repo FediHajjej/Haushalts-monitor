@@ -9,7 +9,7 @@ st.set_page_config(page_title="Energy", page_icon="⚡", layout="wide")
 st.title("⚡ Energy Tracker")
 st.divider()
 
-# ─── Add new reading ──────────────────────────────────────
+#Add new reading
 st.subheader("Add New Reading")
 
 col1, col2, col3, col4 = st.columns(4)
@@ -39,7 +39,7 @@ if st.button("💾 Save Reading"):
 
 st.divider()
 
-# ─── Load data ────────────────────────────────────────────
+#Load data
 conn = create_connection()
 energy_df = pd.read_sql_query("SELECT * FROM energy ORDER BY date", conn)
 conn.close()
@@ -47,7 +47,7 @@ conn.close()
 if energy_df.empty:
     st.warning("No energy data yet. Add your first reading above.")
 else:
-    # ─── Metrics ──────────────────────────────────────────
+    #Metrics
     st.subheader("📊 Overview")
     col1, col2, col3 = st.columns(3)
 
@@ -65,7 +65,7 @@ else:
 
     st.divider()
 
-    # ─── Charts ───────────────────────────────────────────
+    #Charts
     st.subheader("📈 Charts")
     col1, col2 = st.columns(2)
 
@@ -99,6 +99,6 @@ else:
 
     st.divider()
 
-    # ─── Raw data ─────────────────────────────────────────
+    #Raw data
     st.subheader("📋 Raw Data")
     st.dataframe(energy_df, use_container_width=True)
