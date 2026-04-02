@@ -30,7 +30,9 @@ def log_change(table_name, entry_id, field, old_value, new_value):
         conn.commit()
         conn.close()
 
-#Table selector
+
+# Table selector
+selected_table = st.selectbox(
     "Select Table",
     list(TABLE_LABELS.keys()),
     format_func=lambda x: TABLE_LABELS[x]
@@ -282,7 +284,7 @@ with tab2:
             st.caption("No entries selected")
 
 
-#Editing Tab
+#Editing
 with tab3:
     st.subheader("📋 Edit History")
 
