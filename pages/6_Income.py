@@ -13,8 +13,7 @@ st.set_page_config(page_title="Income", page_icon="💰", layout="wide")
 st.title("💰 Income Tracker")
 st.divider()
 
-
-
+#load data
 conn = create_connection()
 income_df = pd.read_sql_query("SELECT * FROM income ORDER BY date DESC", conn)
 expenses_df = pd.read_sql_query(
@@ -42,9 +41,16 @@ except:
     payslips_df = pd.DataFrame()
 
 try:
-    jobs_df = pd.read_sql_query("SELECT * FROM job_profiles ORDER BY person", conn)
+    jobs_df = pd.read_sql_query(
+        "SELECT * FROM job_profiles ORDER BY person, start_date DESC", conn)
 except:
     jobs_df = pd.DataFrame()
+
+try:
+    salary_history_df = pd.read_sql_query(
+        "SELECT * FROM salary_history ORDER BY date DESC", conn)
+except:
+    salary_history_df = pd.DataFrame()
 
 conn.close()
 
@@ -57,10 +63,10 @@ today = pd.Timestamp.now()
 this_month = today.strftime("%Y-%m")
 last_month = (today - timedelta(days=30)).strftime("%Y-%m")
 
-#Tabs
+#tabs
 tab1, tab2, tab3, tab4, tab5, tab6 = st.tabs([
     "📊 Overview",
-    "👫 By Person",
+    "💼 Jobs",
     "📈 Trends",
     "🎯 Savings",
     "🔄 Recurring",
@@ -106,8 +112,7 @@ with tab1:
         st.warning("No income data yet. Add your first entry above.")
         st.stop()
 
-
-#Metrics
+    #metrics
     st.subheader("This Month at a Glance")
 
     monthly_income = income_df[income_df["date"].dt.strftime("%Y-%m") == this_month]
@@ -139,8 +144,7 @@ with tab1:
 
     st.divider()
 
-
-#Charts
+    #charts
     st.subheader("Income vs Expenses")
 
     monthly_inc = income_df.copy()
@@ -216,9 +220,7 @@ with tab1:
 
     st.divider()
 
-
-#general stats
-
+    #general stats
     st.subheader("All Time Stats")
 
     col1, col2, col3, col4 = st.columns(4)
@@ -240,7 +242,6 @@ with tab1:
 
     st.divider()
 
-
     st.subheader("All Income Entries")
 
     csv = income_df.to_csv(index=False).encode("utf-8")
@@ -253,214 +254,381 @@ with tab1:
                      "amount": "Amount (€)", "description": "Description"}),
         use_container_width=True)
 
-#By person
+#Jobs
 with tab2:
-    st.subheader("Income by Person")
+    st.subheader("💼 Jobs")
 
-    if income_df.empty:
-        st.warning("No data yet.")
-        st.stop()
+    #person filter
+    person_filter = st.selectbox(
+        "Filter by Person",
+        ["All"] + people_list,
+        key="jobs_person_filter"
+    )
 
-    persons = income_df["person"].unique()
+    filtered_jobs = jobs_df if person_filter == "All" else \
+        jobs_df[jobs_df["person"] == person_filter] if not jobs_df.empty else pd.DataFrame()
 
-    #yobs
-    if not jobs_df.empty:
-        st.subheader("Job Profiles")
-        cols = st.columns(len(jobs_df))
-        for col, (_, job) in zip(cols, jobs_df.iterrows()):
-            with col:
-                start = job["start_date"]
-                if start:
+    st.divider()
+
+    if jobs_df.empty:
+        st.info("No jobs added yet. Use the Manage tab to add jobs.")
+    else:
+        active_jobs = filtered_jobs[filtered_jobs["status"] == "active"] \
+            if not filtered_jobs.empty else pd.DataFrame()
+        past_jobs = filtered_jobs[filtered_jobs["status"] != "active"] \
+            if not filtered_jobs.empty else pd.DataFrame()
+
+        #current job cards
+        if not active_jobs.empty:
+            st.subheader("Current Jobs")
+            cols = st.columns(min(len(active_jobs), 3))
+            for col, (_, job) in zip(cols, active_jobs.iterrows()):
+                with col:
+                    if job["start_date"]:
+                        try:
+                            start_dt = datetime.strptime(job["start_date"], "%Y-%m-%d")
+                            days = (datetime.now() - start_dt).days
+                            years = days // 365
+                            months = (days % 365) // 30
+                            duration = f"{years}y {months}m" if years > 0 else f"{months}m"
+                        except:
+                            duration = "N/A"
+                    else:
+                        duration = "N/A"
+
+                    hourly = (job["salary_gross"] or 0) / ((job["hours_per_week"] or 1) * 4.33)
+                    notes_html = f'<hr style="border-color:#2a3a2a; margin:10px 0;"><p style="color:#888; font-size:12px; margin:0;">{job["notes"]}</p>' if job["notes"] else ""
+
+                    st.markdown(f"""
+                    <div style="
+                        background-color: #1a2e1a;
+                        border: 1px solid #00CC96;
+                        border-radius: 14px;
+                        padding: 20px;
+                        margin-bottom: 15px;
+                    ">
+                        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:10px;">
+                            <h3 style="margin:0; color:#00CC96;">{job['person']}</h3>
+                            <span style="background:#00CC9622; color:#00CC96;
+                                padding:4px 12px; border-radius:20px; font-size:12px;
+                                border:1px solid #00CC96;">● Active</span>
+                        </div>
+                        <p style="font-size:20px; margin:0 0 4px 0;"><b>{job['employer'] or 'N/A'}</b></p>
+                        <p style="color:#aaa; margin:0 0 12px 0;">
+                            {job['job_title'] or 'N/A'} · {job['contract_type'] or 'N/A'}
+                        </p>
+                        <hr style="border-color:#2a3a2a; margin:10px 0;">
+                        <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">STARTED</p>
+                                <p style="margin:0;"><b>{job['start_date'] or 'N/A'}</b></p>
+                            </div>
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">DURATION</p>
+                                <p style="margin:0;"><b>{duration}</b></p>
+                            </div>
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">NET SALARY</p>
+                                <p style="margin:0; color:#00CC96;"><b>€{job['salary_net'] or 0:.2f}/mo</b></p>
+                            </div>
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">GROSS SALARY</p>
+                                <p style="margin:0;"><b>€{job['salary_gross'] or 0:.2f}/mo</b></p>
+                            </div>
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">HOURS/WEEK</p>
+                                <p style="margin:0;"><b>{job['hours_per_week'] or 0}h</b></p>
+                            </div>
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">HOLIDAY DAYS</p>
+                                <p style="margin:0;"><b>{job['holiday_days'] or 'N/A'}</b></p>
+                            </div>
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">NOTICE PERIOD</p>
+                                <p style="margin:0;"><b>{job['notice_period'] or 'N/A'}</b></p>
+                            </div>
+                            <div>
+                                <p style="color:#888; font-size:11px; margin:0;">HOURLY RATE</p>
+                                <p style="margin:0;"><b>€{hourly:.2f}/h</b></p>
+                            </div>
+                        </div>
+                        {notes_html}
+                    </div>
+                    """, unsafe_allow_html=True)
+
+        st.divider()
+
+        #timeline
+        st.subheader("Job Timeline")
+
+        if not filtered_jobs.empty:
+            for person in filtered_jobs["person"].unique():
+                person_jobs = filtered_jobs[filtered_jobs["person"] == person].copy()
+                person_jobs = person_jobs.sort_values("start_date")
+
+                st.markdown(f"**{person}**")
+
+                for _, job in person_jobs.iterrows():
+                    is_active = job["status"] == "active"
+                    border_color = "#00CC96" if is_active else "#555"
+                    bg_color = "#1a2e1a" if is_active else "#1e1e1e"
+                    status_text = "Active" if is_active else "Ended"
+                    status_color = "#00CC96" if is_active else "#888"
+                    end_display = job["end_date"] if job["end_date"] else "Present"
+
+                    if job["start_date"]:
+                        try:
+                            start_dt = datetime.strptime(job["start_date"], "%Y-%m-%d")
+                            end_dt = datetime.strptime(
+                                job["end_date"], "%Y-%m-%d") if job["end_date"] else datetime.now()
+                            days = (end_dt - start_dt).days
+                            years = days // 365
+                            months = (days % 365) // 30
+                            duration = f"{years}y {months}m" if years > 0 else f"{months}m"
+                        except:
+                            duration = "N/A"
+                    else:
+                        duration = "N/A"
+
+                    hours_str = f'· {job["hours_per_week"]}h/week' if job["hours_per_week"] else ""
+                    holiday_str = f'· {job["holiday_days"]} days holiday' if job["holiday_days"] else ""
+                    notice_str = f'· Notice: {job["notice_period"]}' if job["notice_period"] else ""
+
+                    st.markdown(f"""
+                    <div style="display:flex; align-items:stretch; margin-bottom:8px;">
+                        <div style="display:flex; flex-direction:column; align-items:center; margin-right:15px;">
+                            <div style="width:14px; height:14px; border-radius:50%;
+                                background:{border_color}; margin-top:20px; flex-shrink:0;"></div>
+                            <div style="width:2px; background:#333; flex:1; margin-top:4px;"></div>
+                        </div>
+                        <div style="background-color:{bg_color}; border:1px solid {border_color};
+                            border-radius:10px; padding:14px 18px; flex:1; margin-bottom:4px;">
+                            <div style="display:flex; justify-content:space-between; align-items:center;">
+                                <div>
+                                    <b style="font-size:16px;">{job['employer'] or 'N/A'}</b>
+                                    <span style="color:#888; margin-left:8px;">
+                                        {job['job_title'] or ''} · {job['contract_type'] or ''}
+                                    </span>
+                                </div>
+                                <span style="color:{status_color}; font-size:12px;">● {status_text}</span>
+                            </div>
+                            <div style="color:#888; font-size:13px; margin-top:6px;">
+                                {job['start_date'] or 'N/A'} → {end_display}
+                                · <b>{duration}</b>
+                                · Net: <b style="color:{border_color};">€{job['salary_net'] or 0:.2f}/mo</b>
+                                {hours_str} {holiday_str} {notice_str}
+                            </div>
+                        </div>
+                    </div>
+                    """, unsafe_allow_html=True)
+
+                st.write("")
+
+        st.divider()
+
+        #analytics
+        st.subheader("Analytics")
+
+        col1, col2 = st.columns(2)
+
+        with col1:
+            if not filtered_jobs.empty:
+                salary_data = filtered_jobs[filtered_jobs["start_date"].notna()].copy()
+                salary_data = salary_data.sort_values("start_date")
+
+                if not salary_data.empty:
+                    fig = go.Figure()
+                    for person in salary_data["person"].unique():
+                        person_data = salary_data[salary_data["person"] == person]
+                        fig.add_trace(go.Scatter(
+                            x=person_data["start_date"],
+                            y=person_data["salary_net"],
+                            name=f"{person} Net",
+                            mode="lines+markers",
+                            marker=dict(size=10),
+                            line=dict(width=3)
+                        ))
+                    fig.update_layout(
+                        title="Salary Progression Over Time",
+                        xaxis_title="Job Start Date",
+                        yaxis_title="Net Salary (€/month)",
+                        xaxis_tickangle=-45
+                    )
+                    st.plotly_chart(fig, use_container_width=True)
+
+        with col2:
+            if not filtered_jobs.empty and len(filtered_jobs) >= 2:
+                st.markdown("**Compare Jobs**")
+                job_labels = [
+                    f"{row['person']} — {row['employer']}"
+                    for _, row in filtered_jobs.iterrows()
+                ]
+                selected_jobs = st.multiselect(
+                    "Select jobs to compare",
+                    job_labels,
+                    default=job_labels[:2],
+                    key="compare_jobs"
+                )
+
+                if len(selected_jobs) >= 2:
+                    compare_data = []
+                    for label in selected_jobs:
+                        idx = job_labels.index(label)
+                        job = filtered_jobs.iloc[idx]
+                        hourly = (job["salary_gross"] or 0) / ((job["hours_per_week"] or 1) * 4.33)
+                        compare_data.append({
+                            "Job": job["employer"],
+                            "Person": job["person"],
+                            "Net/month": job["salary_net"] or 0,
+                            "Gross/month": job["salary_gross"] or 0,
+                            "Hours/week": job["hours_per_week"] or 0,
+                            "Hourly Rate": round(hourly, 2),
+                            "Holiday Days": job["holiday_days"] or 0,
+                            "Notice Period": job["notice_period"] or "N/A"
+                        })
+
+                    compare_df = pd.DataFrame(compare_data)
+
+                    fig = go.Figure()
+                    fig.add_trace(go.Bar(
+                        name="Net Salary",
+                        x=compare_df["Job"],
+                        y=compare_df["Net/month"],
+                        marker_color="#00CC96"
+                    ))
+                    fig.add_trace(go.Bar(
+                        name="Gross Salary",
+                        x=compare_df["Job"],
+                        y=compare_df["Gross/month"],
+                        marker_color="#AB63FA"
+                    ))
+                    fig.update_layout(barmode="group", title="Salary Comparison")
+                    st.plotly_chart(fig, use_container_width=True)
+
+                    st.dataframe(compare_df.set_index("Job"), use_container_width=True)
+            else:
+                st.info("Add at least 2 jobs to compare them.")
+
+        st.divider()
+
+        #past jobs
+        if not past_jobs.empty:
+            st.subheader("Past Jobs")
+            for _, job in past_jobs.iterrows():
+                if job["start_date"] and job["end_date"]:
                     try:
-                        start_dt = datetime.strptime(start, "%Y-%m-%d")
-                        months_worked = (
-                            datetime.now() - start_dt).days // 30
-                        years = months_worked // 12
-                        months = months_worked % 12
+                        start_dt = datetime.strptime(job["start_date"], "%Y-%m-%d")
+                        end_dt = datetime.strptime(job["end_date"], "%Y-%m-%d")
+                        days = (end_dt - start_dt).days
+                        years = days // 365
+                        months = (days % 365) // 30
                         duration = f"{years}y {months}m" if years > 0 else f"{months}m"
                     except:
                         duration = "N/A"
                 else:
                     duration = "N/A"
 
+                hours_str = f'· {job["hours_per_week"]}h/week' if job["hours_per_week"] else ""
+
                 st.markdown(f"""
-                <div style="
-                    background-color: #1e1e2e;
-                    border: 1px solid #333;
-                    border-radius: 12px;
-                    padding: 20px;
-                ">
-                    <h3 style="margin: 0; color: #00CC96;">{job['person']}</h3>
-                    <p style="margin: 5px 0; font-size: 18px;">
-                        <b>{job['employer'] or 'N/A'}</b>
-                    </p>
-                    <p style="color: #999; margin: 3px 0;">
-                        {job['job_title'] or 'N/A'}
-                    </p>
-                    <p style="color: #999; margin: 3px 0;">
-                        {job['contract_type'] or 'N/A'}
-                    </p>
-                    <hr style="border-color: #333;">
-                    <p style="margin: 3px 0;">
-                        Started: <b>{job['start_date'] or 'N/A'}</b>
-                    </p>
-                    <p style="margin: 3px 0;">
-                        Duration: <b>{duration}</b>
-                    </p>
-                    <p style="margin: 3px 0;">
-                        Net: <b>€{job['salary_net'] or 0:.2f}/month</b>
-                    </p>
-                    <p style="margin: 3px 0;">
-                        Hours: <b>{job['hours_per_week'] or 0}h/week</b>
-                    </p>
+                <div style="background-color:#1a1a1a; border:1px solid #444;
+                    border-radius:10px; padding:15px 20px; margin-bottom:8px; opacity:0.75;">
+                    <div style="display:flex; justify-content:space-between; align-items:center;">
+                        <div>
+                            <b style="font-size:15px;">{job['person']}</b>
+                            <span style="color:#888; margin:0 8px;">at</span>
+                            <b style="font-size:15px;">{job['employer'] or 'N/A'}</b>
+                            <span style="color:#666; margin-left:10px; font-size:13px;">
+                                {job['job_title'] or ''} · {job['contract_type'] or ''}
+                            </span>
+                        </div>
+                        <div style="text-align:right; color:#888; font-size:13px;">
+                            {job['start_date'] or 'N/A'} → {job['end_date'] or 'N/A'}
+                            · <b>{duration}</b><br>
+                            Net: €{job['salary_net'] or 0:.2f}/mo {hours_str}
+                        </div>
+                    </div>
                 </div>
                 """, unsafe_allow_html=True)
 
+        #payslips
         st.divider()
+        st.subheader("📄 Payslips")
 
-    #per person metrics
-    cols = st.columns(len(persons))
-    for col, person in zip(cols, persons):
-        person_data = income_df[income_df["person"] == person]
-        person_this_month = person_data[
-            person_data["date"].dt.strftime("%Y-%m") == this_month]
-        with col:
-            total = person_data["amount"].sum()
-            this_m = person_this_month["amount"].sum()
-            avg = person_data.groupby(
-                person_data["date"].dt.strftime("%Y-%m"))["amount"].sum().mean()
-            st.markdown(f"### {person}")
-            st.metric("This Month", f"€{this_m:.2f}")
-            st.metric("All Time Total", f"€{total:.2f}")
-            st.metric("Monthly Average", f"€{avg:.2f}")
+        with st.expander("Upload Payslip"):
+            col1, col2, col3, col4 = st.columns(4)
+            with col1:
+                ps_person = st.selectbox("Person", people_list, key="ps_person")
+            with col2:
+                ps_month = st.text_input("Month (YYYY-MM)", value=today.strftime("%Y-%m"))
+            with col3:
+                ps_amount = st.number_input("Net Amount (€)", min_value=0.0,
+                                            step=0.01, key="ps_amt")
+            with col4:
+                ps_notes = st.text_input("Notes", key="ps_notes")
 
-    st.divider()
+            ps_file = st.file_uploader("Upload Payslip",
+                                       type=["pdf", "png", "jpg", "jpeg"],
+                                       key="ps_file")
 
-    col1, col2 = st.columns(2)
+            if st.button("💾 Save Payslip", type="primary"):
+                if ps_file:
+                    os.makedirs("payslips", exist_ok=True)
+                    file_path = os.path.join(
+                        "payslips", f"{ps_person}_{ps_month}_{ps_file.name}")
+                    with open(file_path, "wb") as f:
+                        f.write(ps_file.getbuffer())
+                    conn = create_connection()
+                    conn.execute("""
+                        INSERT INTO payslips
+                        (person, month, file_path, amount, notes, uploaded_date)
+                        VALUES (?, ?, ?, ?, ?, ?)
+                    """, (ps_person, ps_month, file_path, ps_amount,
+                          ps_notes, str(date.today())))
+                    conn.commit()
+                    conn.close()
+                    st.success("Payslip saved!")
+                    st.rerun()
+                else:
+                    st.warning("Please upload a file")
 
-    with col1:
-        person_totals = income_df.groupby("person")["amount"].sum().reset_index()
-        fig = px.pie(person_totals, values="amount", names="person",
-                     title="Total Income Split by Person",
-                     color_discrete_sequence=["#00CC96", "#AB63FA", "#FFD700"])
-        st.plotly_chart(fig, use_container_width=True)
+        if not payslips_df.empty:
+            ps_filter = st.selectbox("Filter by Person", ["All"] + people_list,
+                                     key="filter_ps")
+            filtered_ps = payslips_df if ps_filter == "All" else \
+                payslips_df[payslips_df["person"] == ps_filter]
 
-    with col2:
-        income_df["month"] = income_df["date"].dt.strftime("%Y-%m")
-        monthly_by_person = income_df.groupby(
-            ["month", "person"])["amount"].sum().reset_index()
-        fig = px.bar(monthly_by_person, x="month", y="amount", color="person",
-                     title="Monthly Income by Person",
-                     barmode="group",
-                     color_discrete_sequence=["#00CC96", "#AB63FA", "#FFD700"])
-        fig.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig, use_container_width=True)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        fig = px.area(monthly_by_person, x="month", y="amount", color="person",
-                      title="Income Contribution Over Time",
-                      color_discrete_sequence=["#00CC96", "#AB63FA", "#FFD700"])
-        fig.update_layout(xaxis_tickangle=-45)
-        st.plotly_chart(fig, use_container_width=True)
-
-    with col2:
-        source_totals = income_df.groupby("source")["amount"].sum().reset_index()
-        fig = px.pie(source_totals, values="amount", names="source",
-                     title="Income by Source",
-                     color_discrete_sequence=px.colors.qualitative.Set3)
-        st.plotly_chart(fig, use_container_width=True)
-
-    st.divider()
-
-    #payslips
-    st.subheader("📄 Payslips")
-
-    with st.expander("Upload Payslip"):
-        col1, col2, col3, col4 = st.columns(4)
-        with col1:
-            ps_person = st.selectbox("Person", people_list, key="ps_person")
-        with col2:
-            ps_month = st.text_input("Month (YYYY-MM)",
-                                     value=today.strftime("%Y-%m"))
-        with col3:
-            ps_amount = st.number_input("Net Amount (€)", min_value=0.0,
-                                        step=0.01, key="ps_amt")
-        with col4:
-            ps_notes = st.text_input("Notes", key="ps_notes")
-
-        ps_file = st.file_uploader("Upload Payslip",
-                                   type=["pdf", "png", "jpg", "jpeg"],
-                                   key="ps_file")
-
-        if st.button("💾 Save Payslip", type="primary"):
-            if ps_file:
-                os.makedirs("payslips", exist_ok=True)
-                file_path = os.path.join(
-                    "payslips", f"{ps_person}_{ps_month}_{ps_file.name}")
-                with open(file_path, "wb") as f:
-                    f.write(ps_file.getbuffer())
-                conn = create_connection()
-                conn.execute("""
-                    INSERT INTO payslips
-                    (person, month, file_path, amount, notes, uploaded_date)
-                    VALUES (?, ?, ?, ?, ?, ?)
-                """, (ps_person, ps_month, file_path, ps_amount,
-                      ps_notes, str(date.today())))
-                conn.commit()
-                conn.close()
-                st.success("Payslip saved!")
-                st.rerun()
-            else:
-                st.warning("Please upload a file")
-
-    if not payslips_df.empty:
-        filter_person = st.selectbox(
-            "Filter by Person",
-            ["All"] + people_list,
-            key="filter_ps"
-        )
-
-        filtered_ps = payslips_df if filter_person == "All" else \
-            payslips_df[payslips_df["person"] == filter_person]
-
-        for _, row in filtered_ps.iterrows():
-            with st.expander(
-                    f"{row['person']} — {row['month']} | €{row['amount'] or 0:.2f}"):
-                col1, col2 = st.columns([3, 1])
-
-                with col1:
-                    if os.path.exists(row["file_path"]):
-                        if row["file_path"].endswith(".pdf"):
-                            with open(row["file_path"], "rb") as f:
-                                b64 = base64.b64encode(f.read()).decode()
-                            st.markdown(
-                                f'<iframe src="data:application/pdf;base64,{b64}"'
-                                f' width="100%" height="500px"></iframe>',
-                                unsafe_allow_html=True)
+            for _, row in filtered_ps.iterrows():
+                with st.expander(
+                        f"{row['person']} — {row['month']} | €{row['amount'] or 0:.2f}"):
+                    col1, col2 = st.columns([3, 1])
+                    with col1:
+                        if os.path.exists(row["file_path"]):
+                            if row["file_path"].endswith(".pdf"):
+                                with open(row["file_path"], "rb") as f:
+                                    b64 = base64.b64encode(f.read()).decode()
+                                st.markdown(
+                                    f'<iframe src="data:application/pdf;base64,{b64}"'
+                                    f' width="100%" height="500px"></iframe>',
+                                    unsafe_allow_html=True)
+                            else:
+                                st.image(row["file_path"])
                         else:
-                            st.image(row["file_path"])
-                    else:
-                        st.warning("File not found")
-
-                with col2:
-                    st.write(f"**Person:** {row['person']}")
-                    st.write(f"**Month:** {row['month']}")
-                    st.write(f"**Amount:** €{row['amount'] or 0:.2f}")
-                    st.write(f"**Notes:** {row['notes'] or '-'}")
-                    st.write(f"**Uploaded:** {row['uploaded_date']}")
-
-                    if os.path.exists(row["file_path"]):
-                        with open(row["file_path"], "rb") as f:
-                            st.download_button(
-                                "⬇️ Download",
-                                data=f,
-                                file_name=os.path.basename(row["file_path"]),
-                                key=f"dl_{row['id']}"
-                            )
-    else:
-        st.info("No payslips uploaded yet.")
+                            st.warning("File not found")
+                    with col2:
+                        st.write(f"**Person:** {row['person']}")
+                        st.write(f"**Month:** {row['month']}")
+                        st.write(f"**Amount:** €{row['amount'] or 0:.2f}")
+                        st.write(f"**Notes:** {row['notes'] or '-'}")
+                        st.write(f"**Uploaded:** {row['uploaded_date']}")
+                        if os.path.exists(row["file_path"]):
+                            with open(row["file_path"], "rb") as f:
+                                st.download_button(
+                                    "⬇️ Download", data=f,
+                                    file_name=os.path.basename(row["file_path"]),
+                                    key=f"dl_{row['id']}")
+        else:
+            st.info("No payslips uploaded yet.")
 
 #Trends
 with tab3:
@@ -487,8 +655,7 @@ with tab3:
             x=monthly_totals["month"], y=monthly_totals["rolling_avg"],
             name="3 Month Average", mode="lines",
             line=dict(color="#FFD700", width=3)))
-        fig.update_layout(title="Income with Rolling Average",
-                          xaxis_tickangle=-45)
+        fig.update_layout(title="Income with Rolling Average", xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
@@ -501,20 +668,14 @@ with tab3:
         direction = "Growing" if trend_pct >= 0 else "Declining"
 
         st.markdown(f"""
-        <div style="
-            background-color: {color}22;
-            border: 3px solid {color};
-            border-radius: 15px;
-            padding: 30px;
-            text-align: center;
-            margin-top: 20px;
-        ">
-            <p style="font-size: 16px; margin: 0;">Income Trend</p>
-            <h1 style="color: {color}; font-size: 60px; margin: 10px 0;">
+        <div style="background-color:{color}22; border:3px solid {color};
+            border-radius:15px; padding:30px; text-align:center; margin-top:20px;">
+            <p style="font-size:16px; margin:0;">Income Trend</p>
+            <h1 style="color:{color}; font-size:60px; margin:10px 0;">
                 {"↑" if trend_pct >= 0 else "↓"} {abs(trend_pct):.1f}%
             </h1>
-            <h3 style="color: {color};">{direction}</h3>
-            <p style="color: #999; font-size: 13px;">
+            <h3 style="color:{color};">{direction}</h3>
+            <p style="color:#999; font-size:13px;">
                 First half avg: €{first_avg:.2f} vs Recent avg: €{second_avg:.2f}
             </p>
         </div>
@@ -539,7 +700,7 @@ with tab3:
     with col3:
         st.metric("Projected Annual Savings", f"€{projected_savings:.2f}")
 
-#SAVINGS
+#Savings
 with tab4:
     st.subheader("Savings Tracker")
 
@@ -608,8 +769,7 @@ with tab4:
         fig.add_hline(y=savings_goal, line_dash="dash",
                       annotation_text=f"Goal €{savings_goal:.0f}",
                       line_color="#FFD700")
-        fig.update_layout(title="Monthly Savings vs Goal",
-                          xaxis_tickangle=-45)
+        fig.update_layout(title="Monthly Savings vs Goal", xaxis_tickangle=-45)
         st.plotly_chart(fig, use_container_width=True)
 
     with col2:
@@ -626,11 +786,9 @@ with tab4:
     col1, col2 = st.columns(2)
 
     with col1:
-        house_price = st.number_input(
-            "Target House Price (€)", min_value=0.0,
-            value=250000.0, step=10000.0)
-        down_payment_pct = st.slider(
-            "Down Payment %", min_value=10, max_value=40, value=20)
+        house_price = st.number_input("Target House Price (€)", min_value=0.0,
+                                      value=250000.0, step=10000.0)
+        down_payment_pct = st.slider("Down Payment %", min_value=10, max_value=40, value=20)
 
     with col2:
         down_payment = house_price * (down_payment_pct / 100)
@@ -658,16 +816,14 @@ with tab4:
         st.metric("Years to Goal", f"{years_needed:.1f}")
 
     target_date = pd.Timestamp.now() + pd.DateOffset(months=int(months_needed))
-    st.info(
-        f"At your current savings rate of €{savings_goal:.0f}/month "
-        f"you could afford this house by **{target_date.strftime('%B %Y')}**")
+    st.info(f"At your current savings rate of €{savings_goal:.0f}/month "
+            f"you could afford this house by **{target_date.strftime('%B %Y')}**")
 
-#recurring
+#Recurring
 with tab5:
     st.subheader("🔄 Recurring Income")
-    st.caption("Set up income that repeats every month — log it all at once")
+    st.caption("Set up income that repeats every month")
 
-    #add
     with st.expander("➕ Add Recurring Income"):
         with st.form("recurring_form"):
             col1, col2, col3, col4 = st.columns(4)
@@ -676,12 +832,11 @@ with tab5:
             with col2:
                 rec_source = st.selectbox("Source", sources_list, key="rec_source")
             with col3:
-                rec_amount = st.number_input(
-                    "Monthly Amount (€)", min_value=0.0, step=0.01)
+                rec_amount = st.number_input("Monthly Amount (€)", min_value=0.0, step=0.01)
             with col4:
                 rec_desc = st.text_input("Description", key="rec_desc")
 
-            if st.form_submit_button("💾 Save Recurring Income", type="primary"):
+            if st.form_submit_button("💾 Save", type="primary"):
                 if rec_amount > 0:
                     conn = create_connection()
                     conn.execute("""
@@ -698,9 +853,7 @@ with tab5:
 
     if not recurring_df.empty:
         st.subheader("Active Recurring Income")
-
-        total_recurring = recurring_df["amount"].sum()
-        st.metric("Total Monthly Recurring", f"€{total_recurring:.2f}")
+        st.metric("Total Monthly Recurring", f"€{recurring_df['amount'].sum():.2f}")
         st.divider()
 
         for _, row in recurring_df.iterrows():
@@ -716,20 +869,15 @@ with tab5:
             with col5:
                 if st.button("🗑️", key=f"del_rec_{row['id']}"):
                     conn = create_connection()
-                    conn.execute(
-                        "UPDATE recurring_income SET active=0 WHERE id=?",
-                        (row["id"],))
+                    conn.execute("UPDATE recurring_income SET active=0 WHERE id=?",
+                                 (row["id"],))
                     conn.commit()
                     conn.close()
                     st.rerun()
 
         st.divider()
 
-        st.subheader("Log Recurring Income")
-        st.caption("Click to add all recurring entries for a specific month")
-
-        log_month = st.text_input(
-            "Month to log (YYYY-MM)", value=today.strftime("%Y-%m"))
+        log_month = st.text_input("Month to log (YYYY-MM)", value=today.strftime("%Y-%m"))
 
         if st.button("📥 Log All Recurring for This Month", type="primary"):
             conn = create_connection()
@@ -743,14 +891,14 @@ with tab5:
                 count += 1
             conn.commit()
             conn.close()
-            st.success(f"Logged {count} recurring income entries for {log_month}!")
+            st.success(f"Logged {count} entries for {log_month}!")
             st.rerun()
     else:
-        st.info("No recurring income set up yet. Add one above.")
+        st.info("No recurring income set up yet.")
 
 #Manage
 with tab6:
-    st.subheader("⚙️ Manage People & Sources")
+    st.subheader("⚙️ Manage People, Sources & Jobs")
 
     col1, col2 = st.columns(2)
 
@@ -763,23 +911,14 @@ with tab6:
             for i, person in enumerate(people_list):
                 with cols[i % 2]:
                     st.markdown(f"""
-                    <div style="
-                        background-color: #1e1e2e;
-                        border: 1px solid #333;
-                        border-radius: 10px;
-                        padding: 12px 16px;
-                        margin-bottom: 10px;
-                        display: flex;
-                        align-items: center;
-                    ">
-                        <span style="font-size: 16px;">👤 <b>{person}</b></span>
+                    <div style="background-color:#1e1e2e; border:1px solid #333;
+                        border-radius:10px; padding:12px 16px; margin-bottom:10px;">
+                        <span style="font-size:16px;">👤 <b>{person}</b></span>
                     </div>
                     """, unsafe_allow_html=True)
-
                     if st.button("🗑️ Remove", key=f"del_person_{person}"):
                         conn = create_connection()
-                        conn.execute(
-                            "DELETE FROM people WHERE name=?", (person,))
+                        conn.execute("DELETE FROM people WHERE name=?", (person,))
                         conn.commit()
                         conn.close()
                         st.rerun()
@@ -792,9 +931,8 @@ with tab6:
             if new_person.strip():
                 conn = create_connection()
                 try:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO people (name) VALUES (?)",
-                        (new_person.strip(),))
+                    conn.execute("INSERT OR IGNORE INTO people (name) VALUES (?)",
+                                 (new_person.strip(),))
                     conn.commit()
                     st.success(f"Added {new_person}!")
                     st.rerun()
@@ -812,21 +950,14 @@ with tab6:
             for i, source in enumerate(sources_list):
                 with cols[i % 2]:
                     st.markdown(f"""
-                    <div style="
-                        background-color: #1e1e2e;
-                        border: 1px solid #333;
-                        border-radius: 10px;
-                        padding: 12px 16px;
-                        margin-bottom: 10px;
-                    ">
-                        <span style="font-size: 16px;">💼 <b>{source}</b></span>
+                    <div style="background-color:#1e1e2e; border:1px solid #333;
+                        border-radius:10px; padding:12px 16px; margin-bottom:10px;">
+                        <span style="font-size:16px;">💼 <b>{source}</b></span>
                     </div>
                     """, unsafe_allow_html=True)
-
                     if st.button("🗑️ Remove", key=f"del_source_{source}"):
                         conn = create_connection()
-                        conn.execute(
-                            "DELETE FROM income_sources WHERE name=?", (source,))
+                        conn.execute("DELETE FROM income_sources WHERE name=?", (source,))
                         conn.commit()
                         conn.close()
                         st.rerun()
@@ -839,9 +970,8 @@ with tab6:
             if new_source.strip():
                 conn = create_connection()
                 try:
-                    conn.execute(
-                        "INSERT OR IGNORE INTO income_sources (name) VALUES (?)",
-                        (new_source.strip(),))
+                    conn.execute("INSERT OR IGNORE INTO income_sources (name) VALUES (?)",
+                                 (new_source.strip(),))
                     conn.commit()
                     st.success(f"Added {new_source}!")
                     st.rerun()
@@ -853,86 +983,198 @@ with tab6:
     st.divider()
 
     #jobs
-    st.subheader("💼 Job Profiles")
-    st.caption("Track employment details per person")
+    st.subheader("💼 Job Management")
 
-    selected_person = st.selectbox(
-        "Select Person to Edit Job Profile",
-        people_list if people_list else ["Add a person above"])
+    job_action = st.radio("Action", ["Add New Job", "Edit Job", "End a Job", "Delete Job"],
+                          horizontal=True)
 
-    if selected_person and people_list:
-        existing = jobs_df[jobs_df["person"] == selected_person].iloc[0] \
-            if not jobs_df.empty and selected_person in jobs_df["person"].values \
-            else None
-
-        with st.form("job_profile_form"):
+    if job_action == "Add New Job":
+        with st.form("add_job_form"):
             col1, col2, col3 = st.columns(3)
 
             with col1:
-                employer = st.text_input(
-                    "Employer",
-                    value=existing["employer"] if existing is not None
-                    and existing["employer"] else "")
-                job_title = st.text_input(
-                    "Job Title",
-                    value=existing["job_title"] if existing is not None
-                    and existing["job_title"] else "")
-                contract_type = st.selectbox(
-                    "Contract Type",
+                job_person = st.selectbox(
+                    "Person", people_list if people_list else ["Add a person above"])
+                employer = st.text_input("Employer")
+                job_title = st.text_input("Job Title")
+                contract_type = st.selectbox("Contract Type",
                     ["Full Time", "Part Time", "Werkstudent",
-                     "Ausbildung", "Minijob", "Freelance", "Other"],
-                    index=0)
+                     "Ausbildung", "Minijob", "Freelance", "Other"])
 
             with col2:
-                start_date = st.text_input(
-                    "Start Date (YYYY-MM-DD)",
-                    value=existing["start_date"] if existing is not None
-                    and existing["start_date"] else "")
-                salary_net = st.number_input(
-                    "Net Salary (€/month)",
-                    value=float(existing["salary_net"])
-                    if existing is not None and existing["salary_net"] else 0.0,
-                    min_value=0.0, step=0.01)
-                salary_gross = st.number_input(
-                    "Gross Salary (€/month)",
-                    value=float(existing["salary_gross"])
-                    if existing is not None and existing["salary_gross"] else 0.0,
-                    min_value=0.0, step=0.01)
+                start_date = st.text_input("Start Date (YYYY-MM-DD)")
+                salary_net = st.number_input("Net Salary (€/month)", min_value=0.0, step=0.01)
+                salary_gross = st.number_input("Gross Salary (€/month)", min_value=0.0, step=0.01)
+                hours_per_week = st.number_input("Hours per Week", min_value=0.0, step=0.5)
 
             with col3:
-                hours_per_week = st.number_input(
-                    "Hours per Week",
-                    value=float(existing["hours_per_week"])
-                    if existing is not None and existing["hours_per_week"] else 0.0,
-                    min_value=0.0, step=0.5)
-                notes = st.text_area(
-                    "Notes",
-                    value=existing["notes"] if existing is not None
-                    and existing["notes"] else "")
+                notice_period = st.text_input("Notice Period (e.g. 4 weeks, 3 months)")
+                holiday_days = st.number_input("Holiday Days per Year", min_value=0, step=1)
+                notes = st.text_area("Notes")
+                auto_source = st.checkbox("Auto-add employer as income source", value=True)
+                auto_recurring = st.checkbox("Auto-create recurring income entry", value=True)
 
-            if st.form_submit_button("💾 Save Job Profile", type="primary"):
-                conn = create_connection()
-                if existing is not None:
-                    conn.execute("""
-                        UPDATE job_profiles SET
-                        employer=?, job_title=?, contract_type=?,
-                        start_date=?, salary_net=?, salary_gross=?,
-                        hours_per_week=?, notes=?
-                        WHERE person=?
-                    """, (employer, job_title, contract_type, start_date,
-                          salary_net, salary_gross, hours_per_week,
-                          notes, selected_person))
-                else:
+            if st.form_submit_button("💾 Add Job", type="primary"):
+                if employer and job_person:
+                    conn = create_connection()
                     conn.execute("""
                         INSERT INTO job_profiles
-                        (person, employer, job_title, contract_type,
-                        start_date, salary_net, salary_gross,
-                        hours_per_week, notes)
-                        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-                    """, (selected_person, employer, job_title, contract_type,
-                          start_date, salary_net, salary_gross,
-                          hours_per_week, notes))
+                        (person, employer, job_title, contract_type, start_date,
+                        end_date, status, salary_net, salary_gross,
+                        hours_per_week, notice_period, holiday_days, notes)
+                        VALUES (?, ?, ?, ?, ?, NULL, 'active', ?, ?, ?, ?, ?, ?)
+                    """, (job_person, employer, job_title, contract_type, start_date,
+                          salary_net, salary_gross, hours_per_week,
+                          notice_period, holiday_days, notes))
+
+                    if auto_source and employer:
+                        conn.execute("INSERT OR IGNORE INTO income_sources (name) VALUES (?)",
+                                     (employer,))
+
+                    if auto_recurring and salary_net > 0:
+                        conn.execute("""
+                            INSERT INTO recurring_income
+                            (person, source, amount, description, active)
+                            VALUES (?, ?, ?, ?, 1)
+                        """, (job_person, employer, salary_net,
+                              f"Monthly salary — {employer}"))
+
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Job added for {job_person} at {employer}!")
+                    st.rerun()
+                else:
+                    st.warning("Person and employer are required")
+
+    elif job_action == "Edit Job":
+        if not jobs_df.empty:
+            job_labels = [f"{row['person']} — {row['employer']} ({row['status']})"
+                          for _, row in jobs_df.iterrows()]
+            selected_label = st.selectbox("Select Job", job_labels)
+            selected_idx = job_labels.index(selected_label)
+            job = jobs_df.iloc[selected_idx]
+
+            with st.form("edit_job_form"):
+                col1, col2, col3 = st.columns(3)
+
+                with col1:
+                    employer = st.text_input("Employer", value=job["employer"] or "")
+                    job_title = st.text_input("Job Title", value=job["job_title"] or "")
+                    ct_options = ["Full Time", "Part Time", "Werkstudent",
+                                  "Ausbildung", "Minijob", "Freelance", "Other"]
+                    ct_index = ct_options.index(job["contract_type"]) \
+                        if job["contract_type"] in ct_options else 0
+                    contract_type = st.selectbox("Contract Type", ct_options, index=ct_index)
+
+                with col2:
+                    start_date = st.text_input("Start Date", value=job["start_date"] or "")
+                    salary_net = st.number_input("Net Salary (€/month)",
+                                                  value=float(job["salary_net"] or 0),
+                                                  min_value=0.0, step=0.01)
+                    salary_gross = st.number_input("Gross Salary (€/month)",
+                                                    value=float(job["salary_gross"] or 0),
+                                                    min_value=0.0, step=0.01)
+                    hours_per_week = st.number_input("Hours per Week",
+                                                      value=float(job["hours_per_week"] or 0),
+                                                      min_value=0.0, step=0.5)
+
+                with col3:
+                    notice_period = st.text_input("Notice Period",
+                                                   value=job["notice_period"] or "")
+                    holiday_days = st.number_input("Holiday Days",
+                                                    value=int(job["holiday_days"] or 0),
+                                                    min_value=0, step=1)
+                    notes = st.text_area("Notes", value=job["notes"] or "")
+
+                if st.form_submit_button("💾 Save Changes", type="primary"):
+                    conn = create_connection()
+                    conn.execute("""
+                        UPDATE job_profiles SET
+                        employer=?, job_title=?, contract_type=?, start_date=?,
+                        salary_net=?, salary_gross=?, hours_per_week=?,
+                        notice_period=?, holiday_days=?, notes=?
+                        WHERE id=?
+                    """, (employer, job_title, contract_type, start_date,
+                          salary_net, salary_gross, hours_per_week,
+                          notice_period, holiday_days, notes, job["id"]))
+                    conn.commit()
+                    conn.close()
+                    st.success("Job updated!")
+                    st.rerun()
+        else:
+            st.info("No jobs added yet.")
+
+    elif job_action == "End a Job":
+        if not jobs_df.empty:
+            active_jobs = jobs_df[jobs_df["status"] == "active"]
+            if not active_jobs.empty:
+                job_labels = [
+                    f"{row['person']} — {row['employer']} (since {row['start_date']})"
+                    for _, row in active_jobs.iterrows()]
+                selected_label = st.selectbox("Select Job to End", job_labels)
+                selected_idx = job_labels.index(selected_label)
+                selected_job = active_jobs.iloc[selected_idx]
+
+                end_date = st.text_input("End Date (YYYY-MM-DD)",
+                                          value=today.strftime("%Y-%m-%d"))
+                deactivate_recurring = st.checkbox(
+                    "Also deactivate recurring income for this job", value=True)
+
+                if st.button("🔴 End Job", type="primary"):
+                    conn = create_connection()
+                    conn.execute("""
+                        UPDATE job_profiles SET status='inactive', end_date=?
+                        WHERE id=?
+                    """, (end_date, selected_job["id"]))
+                    if deactivate_recurring:
+                        conn.execute("""
+                            UPDATE recurring_income SET active=0
+                            WHERE person=? AND source=?
+                        """, (selected_job["person"], selected_job["employer"]))
+                    conn.commit()
+                    conn.close()
+                    st.success(f"Job ended for {selected_job['person']} at {selected_job['employer']}")
+                    st.rerun()
+            else:
+                st.info("No active jobs to end.")
+        else:
+            st.info("No jobs added yet.")
+
+    else:
+        #delete job
+        if not jobs_df.empty:
+            job_labels = [f"{row['person']} — {row['employer']} ({row['status']})"
+                          for _, row in jobs_df.iterrows()]
+            selected_label = st.selectbox("Select Job to Delete", job_labels)
+            selected_idx = job_labels.index(selected_label)
+            selected_job = jobs_df.iloc[selected_idx]
+
+            st.warning(f"This will permanently delete the job at **{selected_job['employer']}** for **{selected_job['person']}**")
+
+            if st.button("🗑️ Delete Job Permanently", type="primary"):
+                conn = create_connection()
+                conn.execute("DELETE FROM job_profiles WHERE id=?", (selected_job["id"],))
                 conn.commit()
                 conn.close()
-                st.success(f"Job profile saved for {selected_person}!")
+                st.success("Job deleted!")
                 st.rerun()
+        else:
+            st.info("No jobs to delete.")
+
+    st.divider()
+
+    #all jobs table
+    if not jobs_df.empty:
+        st.subheader("All Jobs")
+        st.dataframe(
+            jobs_df[["person", "employer", "job_title", "contract_type",
+                     "start_date", "end_date", "status", "salary_net",
+                     "hours_per_week", "notice_period", "holiday_days"]].rename(
+                columns={"person": "Person", "employer": "Employer",
+                         "job_title": "Title", "contract_type": "Type",
+                         "start_date": "Start", "end_date": "End",
+                         "status": "Status", "salary_net": "Net (€)",
+                         "hours_per_week": "Hrs/Week",
+                         "notice_period": "Notice",
+                         "holiday_days": "Holidays"}),
+            use_container_width=True)
