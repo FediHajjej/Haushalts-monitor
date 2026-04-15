@@ -2,47 +2,39 @@ import sqlite3
 conn = sqlite3.connect("haushalts_monitor.db")
 cursor = conn.cursor()
 
-tables = [
-    """CREATE TABLE IF NOT EXISTS recurring_income (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person TEXT NOT NULL,
-        source TEXT NOT NULL,
-        amount REAL NOT NULL,
-        description TEXT,
-        active INTEGER DEFAULT 1
-    )""",
+#add notice period and holiday days to job_profiles
+try:
+    cursor.execute("ALTER TABLE job_profiles ADD COLUMN notice_period TEXT")
+    conn.commit()
+    print("notice_period added!")
+except Exception as e:
+    print(f"notice_period: {e}")
 
-    """CREATE TABLE IF NOT EXISTS payslips (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person TEXT NOT NULL,
-        month TEXT NOT NULL,
-        file_path TEXT NOT NULL,
-        amount REAL,
-        notes TEXT,
-        uploaded_date TEXT NOT NULL
-    )""",
+try:
+    cursor.execute("ALTER TABLE job_profiles ADD COLUMN holiday_days INTEGER")
+    conn.commit()
+    print("holiday_days added!")
+except Exception as e:
+    print(f"holiday_days: {e}")
 
-    """CREATE TABLE IF NOT EXISTS job_profiles (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        person TEXT UNIQUE NOT NULL,
-        employer TEXT,
-        job_title TEXT,
-        contract_type TEXT,
-        start_date TEXT,
-        salary_net REAL,
-        salary_gross REAL,
-        hours_per_week REAL,
-        notes TEXT
-    )"""
-]
-
-for table in tables:
-    try:
-        cursor.execute(table)
-        conn.commit()
-        print(f"Table created!")
-    except Exception as e:
-        print(f"Error: {e}")
+#raise history table
+try:
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS salary_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_id INTEGER NOT NULL,
+            date TEXT NOT NULL,
+            old_salary_net REAL,
+            new_salary_net REAL,
+            old_salary_gross REAL,
+            new_salary_gross REAL,
+            notes TEXT
+        )
+    """)
+    conn.commit()
+    print("salary_history table created!")
+except Exception as e:
+    print(f"salary_history: {e}")
 
 conn.close()
-print("All done!")
+print("Done!")
